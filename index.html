@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>SaydShop</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <style>
 :root{--bg:#15171d;--card:#1e2129;--card2:#262a34;--ink:#f1f2f5;--mut:#9aa0ad;--line:#2f3340;--ok:#3ecf8e}
 [data-t=light]{--bg:#f5f3ef;--card:#fff;--card2:#ece9e3;--ink:#1d1f24;--mut:#6b7080;--line:#ddd9d1}
@@ -73,21 +75,30 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>Number(n).toLocaleString('ru-RU')+' ₽';
 const ld=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}};
-let db=ld('sm_db',{users:{},products:[],orders:[],topups:[],log:[],presence:{},seq:1});
+let db=norm(null),ready=false,fatal='',presence={},imgs={},off=0,seeding=false;
 let set=ld('sm_set',{t:'dark',ac:'orange'}),sess=ld('sm_sess',null),view='home',amode='in',atab='orders',modal='',sig='';
-if(!db.products.length){db.products=[
- {id:1,cat:'games',name:'Пример: игровая валюта',desc:'Замените в админ-панели',price:300},
- {id:2,cat:'web',name:'Пример: лендинг под ключ',desc:'Замените в админ-панели',price:1500},
- {id:3,cat:'social',name:'Пример: оформление канала',desc:'Замените в админ-панели',price:500}];db.seq=10;localStorage.setItem('sm_db',JSON.stringify(db))}
+// ВСТАВЬТЕ СВОИ НАСТРОЙКИ FIREBASE (Project settings → General → Your apps)
+const CFG={apiKey:"AIzaSyB2-NK-VDmt8ATFwP1Hh2CX46e9u6t65T4",authDomain:"arenaforge-37a01.firebaseapp.com",databaseURL:"https://arenaforge-37a01-default-rtdb.europe-west1.firebasedatabase.app",projectId:"arenaforge-37a01",storageBucket:"arenaforge-37a01.firebasestorage.app",messagingSenderId:"838009938614",appId:"1:838009938614:web:2a9284099e02d6c89ffc17"};
+function norm(d){d=d||{};d.users=d.users||{};['products','orders','topups','log'].forEach(k=>d[k]=Object.values(d[k]||{}));d.orders.forEach(o=>o.msgs=Object.values(o.msgs||{}));d.seq=d.seq||1;return d}
+let R,P,I,rdb;
+try{firebase.initializeApp(CFG);rdb=firebase.database();R=rdb.ref('shop/data');P=rdb.ref('shop/presence');I=rdb.ref('shop/img');
+R.on('value',s=>{db=norm(s.val());fatal='';ready=true;
+ if(!db.seeded&&!seeding){seeding=true;tx(()=>{if(!db.seeded){db.seeded=1;db.products=[{id:1,cat:'games',name:'Пример: игровая валюта',desc:'Замените в админ-панели',price:300},{id:2,cat:'web',name:'Пример: лендинг под ключ',desc:'Замените в админ-панели',price:1500},{id:3,cat:'social',name:'Пример: оформление канала',desc:'Замените в админ-панели',price:500}];db.seq=Math.max(db.seq,10)}})}
+ live()},()=>{fatal='Нет доступа к базе. Проверьте правила (Rules) в Realtime Database.';render()});
+P.on('value',s=>{presence=s.val()||{};live()});
+I.on('value',s=>{imgs=s.val()||{};live()});
+rdb.ref('.info/serverTimeOffset').on('value',s=>off=s.val()||0)}catch(e){fatal='Не удалось подключиться к Firebase: '+e.message}
+setTimeout(()=>{if(!ready&&!fatal){fatal='Не удаётся подключиться к базе. Проверьте интернет, адрес базы и правила.';render()}},10000);
 // Любое изменение: перечитать, изменить, сохранить
-function tx(fn){db=ld('sm_db',db);fn();try{localStorage.setItem('sm_db',JSON.stringify(db))}catch(e){toast('Память браузера заполнена: уменьшите фото')}}
-const img=f=>new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>{const i=new Image();i.onload=()=>{const k=Math.min(1,640/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=Math.round(i.width*k);c.height=Math.round(i.height*k);const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(i,0,0,c.width,c.height);ok(c.toDataURL('image/jpeg',.75))};i.onerror=no;i.src=r.result};r.onerror=no;r.readAsDataURL(f)});
+function tx(fn){return new Promise(res=>{R.transaction(cur=>{const keep=db;db=norm(cur);try{fn()}catch(e){db=keep;return}const out=db;db=keep;return out},()=>res(),true)})}
+const img=f=>new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>{const i=new Image();i.onload=()=>{const k=Math.min(1,480/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=Math.round(i.width*k);c.height=Math.round(i.height*k);const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(i,0,0,c.width,c.height);ok(c.toDataURL('image/jpeg',.7))};i.onerror=no;i.src=r.result};r.onerror=no;r.readAsDataURL(f)});
 const log=x=>{db.log.unshift({t:Date.now(),x});db.log=db.log.slice(0,40)};
 const U=()=>sess&&db.users[sess.nick];
 const hash=async s=>{try{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('sm:'+s));return[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}catch(e){return btoa(unescape(encodeURIComponent(s)))}};
 function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>t.style.display='none',2600)}
 function openTG(text){const u='https://t.me/'+TG_USER+'?text='+encodeURIComponent(text);const w=window.Telegram&&Telegram.WebApp;w&&w.openTelegramLink?w.openTelegramLink(u):window.open(u,'_blank')}
-const online=()=>Object.values(db.presence).filter(t=>Date.now()-t<25000).length;
+const online=()=>Object.values(presence).filter(t=>Date.now()+off-t<35000).length;
+let bn='';function beat(){if(!sess||!U()||!P)return;const r=P.child(sess.nick);if(bn!=sess.nick){bn=sess.nick;r.onDisconnect().remove()}r.set(firebase.database.ServerValue.TIMESTAMP)}
 
 /* ---------- ЭКРАНЫ ---------- */
 function authV(){const up=amode=='up';return `<div class="auth"><h1>Sayd<span style="color:var(--ac)">Shop</span></h1><p class="mut" style="margin-bottom:18px">Игровые товары, сайты, дизайны и соцсети</p>
@@ -106,7 +117,7 @@ function page(){const u=U();
 if(view=='home')return `<h2>Что вам нужно?</h2><p class="mut" style="max-width:460px;margin-bottom:16px">Пополните баланс, выберите товар в каталоге и нажмите «Купить». Дальше общение с продавцом идёт в чате заказа.</p><button data-a="go" data-v="catalog">Открыть каталог</button>`;
 if(view=='catalog')return `<h2>Каталог</h2><div class="grid">${Object.entries(CATS).map(([k,v])=>`<div class="card cat" data-a="go" data-v="cat:${k}"><i>${v[1]}</i><div><b>${v[0]}</b><div class="mut">Товаров: ${db.products.filter(p=>p.cat==k).length}</div></div></div>`).join('')}</div>`;
 if(view.startsWith('cat:')){const k=view.slice(4),ps=db.products.filter(p=>p.cat==k);
-return `<a class="back" data-a="go" data-v="catalog">← Каталог</a><h2>${CATS[k][0]}</h2>${ps.length?`<div class="grid">${ps.map(p=>`<div class="card">${p.img?`<img class="pi" src="${p.img}" alt="">`:`<div class="pi ph">${CATS[k][1]}</div>`}<b>${esc(p.name)}</b><p class="mut" style="margin:6px 0 12px">${esc(p.desc)}</p><div class="row"><span class="price">${money(p.price)}</span><button data-a="buy" data-id="${p.id}">Купить</button></div></div>`).join('')}</div>`:'<p class="mut">В этом каталоге пока пусто.</p>'}`}
+return `<a class="back" data-a="go" data-v="catalog">← Каталог</a><h2>${CATS[k][0]}</h2>${ps.length?`<div class="grid">${ps.map(p=>`<div class="card">${imgs[p.id]?`<img class="pi" src="${imgs[p.id]}" alt="">`:`<div class="pi ph">${CATS[k][1]}</div>`}<b>${esc(p.name)}</b><p class="mut" style="margin:6px 0 12px">${esc(p.desc)}</p><div class="row"><span class="price">${money(p.price)}</span><button data-a="buy" data-id="${p.id}">Купить</button></div></div>`).join('')}</div>`:'<p class="mut">В этом каталоге пока пусто.</p>'}`}
 if(view=='orders'){const os=db.orders.filter(o=>o.nick==u.nick).reverse(),ts=db.topups.filter(t=>t.nick==u.nick).reverse();
 return `<h2>Мои заказы</h2>${os.length?os.map(o=>`<div class="card" style="margin-bottom:10px;cursor:pointer" data-a="open" data-id="${o.id}"><div class="row"><b>${esc(o.name)}</b><span class="price">${money(o.price)}</span></div><span class="tag">${stt(o)}</span></div>`).join(''):'<p class="mut">Заказов пока нет.</p>'}
 <h3>Заявки на пополнение</h3>${ts.length?ts.map(t=>`<div class="row mut" style="padding:4px 0"><span>${money(t.amt)}</span><span class="tag">${t.done?'Зачислено':'Ожидает'}</span></div>`).join(''):'<p class="mut">Нет заявок.</p>'}`}
@@ -135,7 +146,7 @@ const tabs=[['orders','Заказы'],['topups','Заявки'],['products','Т�
 let b='';
 if(atab=='orders')b=db.orders.slice().reverse().map(o=>`<div class="card" style="margin-bottom:8px"><div class="row"><b>#${o.id} ${esc(o.name)}</b><span class="mut">${esc(o.nick)} · ${money(o.price)}</span></div><div class="tabs" style="margin:10px 0 8px">${o.done?'<span class="tag">Заказ завершён покупателем</span>':ST.map((x,i)=>`<button class="${i==o.st?'on':''}" data-a="setst" data-id="${o.id}" data-s="${i}">${x}</button>`).join('')}</div><button class="g" data-a="open" data-id="${o.id}">Открыть чат</button></div>`).join('')||'<p class="mut">Заказов нет.</p>';
 if(atab=='topups')b=db.topups.slice().reverse().map(t=>`<div class="card" style="margin-bottom:8px"><div class="row"><span><b>${money(t.amt)}</b> · ${esc(t.nick)} · ID ${t.uid}</span>${t.done?'<span class="tag">Зачислено</span>':`<button data-a="approve" data-id="${t.id}">Зачислить</button>`}</div></div>`).join('')||'<p class="mut">Заявок нет.</p>';
-if(atab=='products')b=`<div class="card"><label>Каталог</label><select id="pc">${Object.entries(CATS).map(([k,v])=>`<option value="${k}">${v[0]}</option>`).join('')}</select><label>Название</label><input id="pn"><label>Описание</label><input id="pd"><label>Цена, ₽</label><input id="pp" type="number" min="1"><label>Фото (необязательно)</label><input id="pf" type="file" accept="image/*"><button data-a="addp">Добавить товар</button></div><h3>Все товары</h3>${db.products.map(p=>`<div class="card row" style="margin-bottom:8px"><span style="display:flex;gap:10px;align-items:center">${p.img?`<img class="th" src="${p.img}" alt="">`:''}<span><b>${esc(p.name)}</b><br><span class="mut">${CATS[p.cat][0]} · ${money(p.price)}</span></span></span><span><button class="g" data-a="photo" data-id="${p.id}">Сменить фото</button> <button class="d" data-a="delp" data-id="${p.id}">Удалить</button></span></div>`).join('')}`;
+if(atab=='products')b=`<div class="card"><label>Каталог</label><select id="pc">${Object.entries(CATS).map(([k,v])=>`<option value="${k}">${v[0]}</option>`).join('')}</select><label>Название</label><input id="pn"><label>Описание</label><input id="pd"><label>Цена, ₽</label><input id="pp" type="number" min="1"><label>Фото (необязательно)</label><input id="pf" type="file" accept="image/*"><button data-a="addp">Добавить товар</button></div><h3>Все товары</h3>${db.products.map(p=>`<div class="card row" style="margin-bottom:8px"><span style="display:flex;gap:10px;align-items:center">${imgs[p.id]?`<img class="th" src="${imgs[p.id]}" alt="">`:''}<span><b>${esc(p.name)}</b><br><span class="mut">${CATS[p.cat][0]} · ${money(p.price)}</span></span></span><span><button class="g" data-a="photo" data-id="${p.id}">Сменить фото</button> <button class="d" data-a="delp" data-id="${p.id}">Удалить</button></span></div>`).join('')}`;
 if(atab=='users')b=Object.values(db.users).map(u=>`<div class="card" style="margin-bottom:8px"><div class="row"><span><b>${esc(u.nick)}</b> ${u.blocked?'<span class="tag b">Заблокирован</span>':''}<br><span class="mut">ID ${u.id} · ${money(u.bal)}</span></span><button class="${u.blocked?'':'d'}" data-a="block" data-n="${esc(u.nick)}">${u.blocked?'Разблокировать':'Заблокировать'}</button></div>
 <div class="send" style="margin-top:8px"><input type="number" placeholder="Сумма (можно минус)" id="cr-${esc(u.nick)}"><button class="g" data-a="credit" data-n="${esc(u.nick)}">Выдать на баланс</button></div></div>`).join('')||'<p class="mut">Игроков нет.</p>';
 return `<h2>Админ-панель</h2><div class="tabs">${tabs.map(([k,v])=>`<button class="${atab==k?'on':''}" data-a="atab" data-v="${k}">${v}</button>`).join('')}</div>${b}`}
@@ -144,28 +155,34 @@ function stat(){const h=Date.now()-6e5,act=db.log.filter(l=>l.t>h).length;
 return `<div id="st" ${sess.admin?'data-a="stopen"':''}><span class="dot"></span>онлайн ${online()} · заказов ${db.orders.length} · активность ${act}${sess.admin?`<div class="lg">${db.log.slice(0,15).map(l=>new Date(l.t).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+' '+esc(l.x)).join('<br>')||'Пока тихо'}</div>`:''}</div>`}
 
 /* ---------- РЕНДЕР ---------- */
-function render(){const y=scrollY,open=$('#st')&&$('#st').classList.contains('open');
+function render(){document.documentElement.dataset.t=set.t;document.documentElement.dataset.ac=set.ac;
+if(fatal||!ready){$('#app').innerHTML=`<div id="ld" class="auth"><p class="mut">${esc(fatal||'Подключение к базе…')}</p></div>`;return}
+const y=scrollY,open=$('#st')&&$('#st').classList.contains('open');
 document.documentElement.dataset.t=set.t;document.documentElement.dataset.ac=set.ac;
 const u=U();
 if(sess&&u&&u.blocked)$('#app').innerHTML=`<div class="auth"><h1>Доступ закрыт</h1><p class="mut" style="margin:10px 0 16px">Ваш аккаунт заблокирован за нарушение правил. Если это ошибка, напишите продавцу.</p><button data-a="logout">Выйти</button></div>`;
 else $('#app').innerHTML=(sess&&u?shell():authV())+(modal?`<div id="modal"><div class="card">${modal}</div></div>`:'');
 const c=$('#chat');if(c)c.scrollTop=c.scrollHeight;if(open&&$('#st'))$('#st').classList.add('open');scrollTo(0,y);
 sig=sigNow()}
-const sigNow=()=>JSON.stringify([db.users,db.products,db.orders,db.topups,online(),db.log.length]);
+const sigNow=()=>JSON.stringify([db.users,db.products,db.orders,db.topups,online(),db.log.length,Object.keys(imgs).map(k=>k+imgs[k].length).join()]);
+function live(){if(!ready)return;if(!sess){if(!$('.auth')||$('#ld'))render();return}
+ if(modal||sigNow()==sig)return;
+ const f=document.activeElement,fid=f&&f.id,fv=f&&f.value,ss=f&&f.selectionStart;render();
+ if(fid){const e=$('#'+fid);if(e&&e.type!='file'){e.value=fv;e.focus();try{e.setSelectionRange(ss,ss)}catch(x){}}}}
 
 /* ---------- ДЕЙСТВИЯ ---------- */
 const val=id=>($('#'+id)||{}).value||'';
 const A={
 amode(d){amode=d.v;render()},
 async reg(){const n=val('nick').trim(),p=val('pw'),p2=val('pw2'),k=n.toLowerCase();
- if(n.length<3)return toast('Никнейм: минимум 3 символа');if(p.length<6)return toast('Пароль: минимум 6 символов');if(p!=p2)return toast('Пароли не совпадают');
- const ph=await hash(p);let ok=true;
- tx(()=>{if(db.users[k]){ok=false;return}db.users[k]={nick:n,id:String(100000+Math.floor(Math.random()*899999)),pass:ph,bal:0,blocked:false};log('регистрация: '+n)});
- if(!ok)return toast('Такой никнейм уже занят');sess={nick:k,admin:false};localStorage.setItem('sm_sess',JSON.stringify(sess));view='home';render()},
-async login(){const k=val('nick').trim().toLowerCase();db=ld('sm_db',db);const u=db.users[k];
- if(!u||u.pass!=await hash(val('pw')))return toast('Неверный никнейм или пароль');
- sess={nick:k,admin:false};localStorage.setItem('sm_sess',JSON.stringify(sess));tx(()=>log('вход: '+u.nick));view='home';render()},
-logout(){sess=null;localStorage.removeItem('sm_sess');view='home';render()},
+ if(!/^[\p{L}\p{N}_-]{3,20}$/u.test(n))return toast('Никнейм: 3–20 символов, только буквы, цифры, _ и -');if(p.length<6)return toast('Пароль: минимум 6 символов');if(p!=p2)return toast('Пароли не совпадают');
+ const ph=await hash(k+'|'+p);let ok=true;
+ await tx(()=>{ok=true;if(db.users[k]){ok=false;return}db.users[k]={nick:n,id:String(100000+Math.floor(Math.random()*899999)),pass:ph,bal:0,blocked:false};log('регистрация: '+n)});
+ if(!ok)return toast('Такой никнейм уже занят');sess={nick:k,admin:false};localStorage.setItem('sm_sess',JSON.stringify(sess));view='home';beat();render()},
+async login(){const k=val('nick').trim().toLowerCase();const u=db.users[k];
+ if(!u||u.pass!=await hash(k+'|'+val('pw')))return toast('Неверный никнейм или пароль');
+ sess={nick:k,admin:false};localStorage.setItem('sm_sess',JSON.stringify(sess));tx(()=>log('вход: '+u.nick));view='home';beat();render()},
+logout(){if(sess&&P)P.child(sess.nick).remove();bn='';sess=null;localStorage.removeItem('sm_sess');view='home';render()},
 go(d){view=d.v;render()},
 topup(){const u=U();modal=`<h3 style="margin-top:0">Пополнение баланса</h3><p class="mut" style="margin-bottom:10px">Укажите сумму и нажмите «Подать заявку». Когда заявка создастся, вы получите реквизиты в Телеграме. Отправьте на них указанную сумму, и деньги придут на ваш баланс.</p><label>Сумма, ₽</label><input id="ta" type="number" min="1"><label>Никнейм</label><input value="${esc(u.nick)}" readonly><label>Ваш ID</label><input value="${u.id}" readonly><button data-a="sendtop">Подать заявку</button> <button class="g" data-a="close">Отмена</button>`;render()},
 sendtop(){const u=U(),a=Math.floor(+val('ta'));if(!(a>0))return toast('Введите сумму');
@@ -173,9 +190,10 @@ sendtop(){const u=U(),a=Math.floor(+val('ta'));if(!(a>0))return toast('Введ�
  openTG(`Заявка на пополнение\nСумма: ${a} ₽\nНикнейм: ${u.nick}\nID: ${u.id}`)},
 close(){modal='';render()},
 buy(d){const p=db.products.find(x=>x.id==d.id);if(!p)return;modal=`<h3 style="margin-top:0">Подтверждение покупки</h3><p>Вы точно хотите купить этот товар?</p><p style="margin:8px 0 14px"><b>${esc(p.name)}</b><br><span class="price">${money(p.price)}</span></p><button data-a="buyyes" data-id="${p.id}">Да</button> <button class="g" data-a="close">Нет</button>`;render()},
-buyyes(d){const u=U(),p=db.products.find(x=>x.id==d.id);if(!p)return;
+async buyyes(d){const u=U(),p=db.products.find(x=>x.id==d.id);if(!p)return;
  if(u.bal<p.price){toast('Недостаточно средств. Пополните баланс');return A.topup()}
- let id;tx(()=>{db.users[u.nick.toLowerCase()].bal-=p.price;id=db.seq++;db.orders.push({id,nick:u.nick,name:p.name,price:p.price,st:0,msgs:[]});log(u.nick+' купил «'+p.name+'»')});
+ let id=0;await tx(()=>{const me=db.users[u.nick.toLowerCase()];id=0;if(!me||me.blocked||me.bal<p.price)return;me.bal-=p.price;id=db.seq++;db.orders.push({id,nick:u.nick,name:p.name,price:p.price,st:0,msgs:[]});log(u.nick+' купил «'+p.name+'»')});
+ if(!id)return toast('Не удалось оформить заказ. Проверьте баланс');
  view='order:'+id;modal=`<h3 style="margin-top:0">Заказ оформлен</h3><p>Товар или услуга выполняется, подождите немного. Вас осведомят, когда товар будет готов.</p><button data-a="close" style="margin-top:12px">Понятно</button>`;render()},
 confirm(d){modal=`<h3 style="margin-top:0">Подтверждение заказа</h3><p>Вы точно хотите подтвердить заказ? Убедитесь, что товар или услуга получены.</p><div style="margin-top:14px"><button data-a="confirmyes" data-id="${d.id}">Да</button> <button class="g" data-a="close">Нет</button></div>`;render()},
 confirmyes(d){tx(()=>{const o=db.orders.find(o=>o.id==d.id);if(o&&o.nick.toLowerCase()==sess.nick&&o.st==2&&!o.done){o.done=true;o.msgs.push({f:'u',x:'✅ Заказ подтверждён: всё получено.'});log('заказ #'+o.id+' подтверждён')}});modal='';render();toast('Заказ подтверждён')},
@@ -188,9 +206,9 @@ adminin(){if(val('code')!==ADMIN_CODE)return toast('Неверный код');se
 adminout(){sess.admin=false;localStorage.setItem('sm_sess',JSON.stringify(sess));view='settings';render()},
 stopen(){$('#st').classList.toggle('open')},
 atab(d){atab=d.v;render()},
-async addp(){const n=val('pn').trim(),p=+val('pp'),c=val('pc'),d=val('pd').trim(),f=$('#pf')&&$('#pf').files[0];if(!n||!(p>0))return toast('Укажите название и цену');let im='';if(f){try{im=await img(f)}catch(e){return toast('Не удалось загрузить фото')}}tx(()=>db.products.push({id:db.seq++,cat:c,name:n,desc:d,price:Math.floor(p),img:im}));render();toast('Товар добавлен')},
-photo(d){const i=document.createElement('input');i.type='file';i.accept='image/*';i.onchange=async()=>{if(!i.files[0])return;try{const im=await img(i.files[0]);tx(()=>{db.products.find(p=>p.id==d.id).img=im});render();toast('Фото обновлено')}catch(e){toast('Не удалось загрузить фото')}};i.click()},
-delp(d){tx(()=>db.products=db.products.filter(p=>p.id!=d.id));render()},
+async addp(){const n=val('pn').trim(),p=+val('pp'),c=val('pc'),d=val('pd').trim(),f=$('#pf')&&$('#pf').files[0];if(!n||!(p>0))return toast('Укажите название и цену');let im='';if(f){try{im=await img(f)}catch(e){return toast('Не удалось загрузить фото')}}let nid=0;await tx(()=>{nid=db.seq++;db.products.push({id:nid,cat:c,name:n,desc:d,price:Math.floor(p)})});if(im)I.child(String(nid)).set(im);render();toast('Товар добавлен')},
+photo(d){const i=document.createElement('input');i.type='file';i.accept='image/*';i.onchange=async()=>{if(!i.files[0])return;try{const im=await img(i.files[0]);I.child(String(d.id)).set(im);toast('Фото обновлено')}catch(e){toast('Не удалось загрузить фото')}};i.click()},
+delp(d){tx(()=>db.products=db.products.filter(p=>p.id!=d.id));I.child(String(d.id)).remove();render()},
 approve(d){tx(()=>{const t=db.topups.find(t=>t.id==d.id),u=db.users[t.nick.toLowerCase()];if(u&&!t.done){u.bal+=t.amt;t.done=true;log('зачислено '+t.amt+' ₽ → '+u.nick)}});render()},
 credit(d){const a=Math.floor(+val('cr-'+d.n));if(!a)return toast('Введите сумму');tx(()=>{db.users[d.n.toLowerCase()].bal+=a;log('баланс '+d.n+': '+(a>0?'+':'')+a+' ₽')});render();toast('Готово')},
 block(d){tx(()=>{const u=db.users[d.n.toLowerCase()];u.blocked=!u.blocked;log((u.blocked?'блок: ':'разблок: ')+u.nick)});render()}
@@ -199,9 +217,7 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(e
 document.addEventListener('keydown',e=>{if(e.key=='Enter'){const t=e.target;if(t.id=='msg')A.send({id:+view.slice(6)});else if(t.id=='pw'||t.id=='pw2')A[amode=='up'?'reg':'login']()}});
 
 /* ---------- ПУЛЬС: онлайн + синхронизация вкладок ---------- */
-setInterval(()=>{if(sess&&U()){tx(()=>db.presence[sess.nick]=Date.now())}
- else db=ld('sm_db',db);
- const f=document.activeElement;if(!modal&&!(f&&/INPUT|TEXTAREA|SELECT/.test(f.tagName))&&sigNow()!=sig)render()},4000);
+setInterval(beat,12000);setInterval(live,15000);
 window.Telegram&&Telegram.WebApp&&(Telegram.WebApp.ready(),Telegram.WebApp.expand());
 render();
 </script>
