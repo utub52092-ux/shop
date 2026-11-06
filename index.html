@@ -81,6 +81,11 @@ const DESC=['Вы ждёте. Продавец скоро возьмёт зак�
 const ADDR='UQD2rsMKG3th6I7PEKqLYb5D1lUf_b4b1tKTu0tCuHrpxrk9';
 const DEP={usdt:{n:'USDT (TON)',u:'ton://transfer/'+ADDR+'?jetton=EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs',w:'https://app.tonkeeper.com/transfer/'+ADDR+'?jetton=EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs'},gram:{n:'Gram (токен в Telegram)',u:'ton://transfer/'+ADDR,w:'https://app.tonkeeper.com/transfer/'+ADDR}};
 let rsel=null,rtxt='';
+const bestDisc=(u,p)=>(u&&u.disc||[]).filter(x=>!x.pid||x.pid==p.id).sort((a,b)=>b.pct-a.pct)[0];
+const priceFor=(u,p)=>{const d=bestDisc(u,p);return d?Math.max(0,Math.round(p.price*(100-d.pct)/100)):p.price};
+const dstr=t=>{if(!t)return '';const d=new Date(t),z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())};
+const pcode=x=>String(x||'').trim().toUpperCase().replace(/\s+/g,'');
+const pdesc=x=>x.type=='money'?'+'+money(x.amt)+' на баланс':'Скидка '+x.pct+'% на '+(x.pid?'«'+esc((db.products.find(p=>p.id==x.pid)||{name:'удалённый товар'}).name)+'»':'любой товар');
 const stars=n=>{n=Math.round(n);return '★'.repeat(n)+'☆'.repeat(5-n)};
 const revs=p=>db.orders.filter(o=>o.rv&&(o.pid?o.pid==p.id:o.name==p.name)).sort((a,b)=>b.rv.t-a.rv.t);
 const avg=r=>r.length?r.reduce((a,o)=>a+o.rv.s,0)/r.length:0;
@@ -93,7 +98,7 @@ let db=norm(null),ready=false,fatal='',presence={},imgs={},off=0,seeding=false;
 let set=ld('sm_set',{t:'dark',ac:'orange'}),sess=ld('sm_sess',null),view='home',amode='in',atab='orders',modal='',sig='';
 // ВСТАВЬТЕ СВОИ НАСТРОЙКИ FIREBASE (Project settings → General → Your apps)
 const CFG={apiKey:"AIzaSyB2-NK-VDmt8ATFwP1Hh2CX46e9u6t65T4",authDomain:"arenaforge-37a01.firebaseapp.com",databaseURL:"https://arenaforge-37a01-default-rtdb.europe-west1.firebasedatabase.app",projectId:"arenaforge-37a01",storageBucket:"arenaforge-37a01.firebasestorage.app",messagingSenderId:"838009938614",appId:"1:838009938614:web:2a9284099e02d6c89ffc17"};
-function norm(d){d=d||{};d.users=d.users||{};['products','orders','topups','log'].forEach(k=>d[k]=Object.values(d[k]||{}));d.orders.forEach(o=>o.msgs=Object.values(o.msgs||{}));d.seq=d.seq||1;return d}
+function norm(d){d=d||{};d.users=d.users||{};['products','orders','topups','log','promos'].forEach(k=>d[k]=Object.values(d[k]||{}));Object.values(d.users).forEach(u=>u.disc=Object.values(u.disc||{}));d.promos.forEach(x=>x.used=x.used||{});d.orders.forEach(o=>o.msgs=Object.values(o.msgs||{}));d.seq=d.seq||1;return d}
 let R,P,I,rdb;
 try{firebase.initializeApp(CFG);rdb=firebase.database();R=rdb.ref('shop/data');P=rdb.ref('shop/presence');I=rdb.ref('shop/img');
 R.on('value',s=>{db=norm(s.val());fatal='';ready=true;
@@ -122,11 +127,13 @@ ${up?'<label>Повторите пароль</label><input id="pw2" type="passwo
 <button style="width:100%" data-a="${up?'reg':'login'}">${up?'Зарегистрироваться':'Войти'}</button></div>`}
 
 function shell(){const u=U(),adm=sess.admin;
-const nav=[['home','Главная'],['catalog','Каталог'],['orders','Мои заказы'],['settings','Настройки']];if(adm)nav.push(['admin','Админ-панель']);
+const nav=[['home','Главная'],['catalog','Каталог'],['orders','Мои заказы'],['promo','Промокод'],['settings','Настройки']];if(adm)nav.push(['admin','Админ-панель']);
 return `<header><b class="logo">Sayd<span>Shop</span></b><div class="bal"><span>${money(u.bal)}</span><button data-a="topup">Пополнить</button></div></header>
 <div class="wrap"><nav>${nav.map(([k,v])=>`<a data-a="go" data-v="${k}" class="${view==k||(view.startsWith('order:')&&k=='orders')||((view.startsWith('cat:')||view.startsWith('prod:'))&&k=='catalog')?'on':''}">${esc(v)}</a>`).join('')}</nav><main>${page()}</main></div>${stat()}`}
 
+function promoV(){const u=U();return `<h2>Промокод</h2><div class="card"><label>Введите промокод</label><div class="send"><input id="pcode" placeholder="Например, SAYD100" autocomplete="off" maxlength="32"><button data-a="promoact">Активировать</button></div></div><h3>Мои скидки</h3>${u.disc.length?u.disc.map(x=>`<div class="card" style="margin-bottom:8px"><div class="row"><span><b>${esc(x.c)}</b><br><span class="mut">Скидка ${x.pct}% на ${x.pid?'«'+esc((db.products.find(p=>p.id==x.pid)||{name:'удалённый товар'}).name)+'»':'любой товар'}</span></span><span class="tag">Применится при покупке</span></div></div>`).join(''):'<p class="mut">Активных скидок нет. Скидка по промокоду применяется автоматически при следующей покупке подходящего товара.</p>'}`}
 function page(){const u=U();
+if(view=='promo')return promoV();
 if(view=='home')return `<h2>Что вам нужно?</h2><p class="mut" style="max-width:460px;margin-bottom:16px">Пополните баланс, выберите товар в каталоге и нажмите «Купить». Дальше общение с продавцом идёт в чате заказа.</p><button data-a="go" data-v="catalog">Открыть каталог</button>`;
 if(view=='catalog')return `<h2>Каталог</h2><div class="grid">${Object.entries(CATS).map(([k,v])=>`<div class="card cat" data-a="go" data-v="cat:${k}"><i>${v[1]}</i><div><b>${v[0]}</b><div class="mut">Товаров: ${db.products.filter(p=>p.cat==k).length}</div></div></div>`).join('')}</div>`;
 if(view.startsWith('cat:')){const k=view.slice(4),ps=db.products.filter(p=>p.cat==k);
@@ -163,12 +170,14 @@ ${sess.admin&&!o.done?`<div class="tabs">${ST.map((x,i)=>`<button class="${i==o.
 <div class="send"><input id="msg" placeholder="Сообщение…" maxlength="500"><button data-a="send" data-id="${o.id}">Отправить</button></div>`}
 
 function adminV(){
-const tabs=[['orders','Заказы'],['products','Товары'],['users','Игроки']];
+const tabs=[['orders','Заказы'],['products','Товары'],['users','Игроки'],['promos','Промокоды']];
 let b='';
 if(atab=='orders')b=db.orders.slice().reverse().map(o=>`<div class="card" style="margin-bottom:8px"><div class="row"><b>#${o.id} ${esc(o.name)}</b><span class="mut">${esc(o.nick)} · ${money(o.price)}</span></div><div class="tabs" style="margin:10px 0 8px">${o.done?'<span class="tag">Заказ завершён покупателем</span>':ST.map((x,i)=>`<button class="${i==o.st?'on':''}" data-a="setst" data-id="${o.id}" data-s="${i}">${x}</button>`).join('')}</div><button class="g" data-a="open" data-id="${o.id}">Открыть чат</button></div>`).join('')||'<p class="mut">Заказов нет.</p>';
 if(atab=='products')b=`<div class="card"><label>Каталог</label><select id="pc">${Object.entries(CATS).map(([k,v])=>`<option value="${k}">${v[0]}</option>`).join('')}</select><label>Название</label><input id="pn"><label>Описание</label><input id="pd"><label>Цена, ₽</label><input id="pp" type="number" min="1"><label>Фото (необязательно)</label><input id="pf" type="file" accept="image/*"><button data-a="addp">Добавить товар</button></div><h3>Все товары</h3>${db.products.map(p=>`<div class="card row" style="margin-bottom:8px"><span style="display:flex;gap:10px;align-items:center">${imgs[p.id]?`<img class="th" src="${imgs[p.id]}" alt="">`:''}<span><b>${esc(p.name)}</b><br><span class="mut">${CATS[p.cat][0]} · ${money(p.price)}</span></span></span><span><button class="g" data-a="photo" data-id="${p.id}">Сменить фото</button> <button class="d" data-a="delp" data-id="${p.id}">Удалить</button></span></div>`).join('')}`;
 if(atab=='users')b=Object.values(db.users).map(u=>`<div class="card" style="margin-bottom:8px"><div class="row"><span><b>${esc(u.nick)}</b> ${u.blocked?'<span class="tag b">Заблокирован</span>':''}<br><span class="mut">ID ${u.id} · ${money(u.bal)}</span></span><button class="${u.blocked?'':'d'}" data-a="block" data-n="${esc(u.nick)}">${u.blocked?'Разблокировать':'Заблокировать'}</button></div>
 <div class="send" style="margin-top:8px"><input type="number" placeholder="Сумма (можно минус)" id="cr-${esc(u.nick)}"><button class="g" data-a="credit" data-n="${esc(u.nick)}">Выдать на баланс</button></div></div>`).join('')||'<p class="mut">Игроков нет.</p>';
+if(atab=='promos'){const po=x=>db.products.map(p=>`<option value="${p.id}" ${x&&x.pid==p.id?'selected':''}>${esc(p.name)}</option>`).join('');
+b=`<div class="card"><label>Промокод</label><input id="nc" placeholder="Например, SAYD100" maxlength="32"><label>Что даёт</label><select id="nt"><option value="money">Деньги на баланс</option><option value="disc">Скидка на товар, %</option></select><label>Сумма (₽) или процент скидки (1–100)</label><input id="na" type="number" min="1"><label>Для скидки: на какой товар</label><select id="np"><option value="0">Любой товар</option>${po()}</select><label>Количество активаций (0 или пусто — без лимита)</label><input id="nm" type="number" min="0"><label>Действует до (пусто — без срока)</label><input id="ne" type="date"><button data-a="padd">Добавить промокод</button></div><h3>Все промокоды</h3>${db.promos.map(x=>{const n=Object.keys(x.used).length,dead=(x.max&&n>=x.max)||(x.exp&&Date.now()>x.exp);return `<div class="card" style="margin-bottom:8px"><div class="row"><b>${esc(x.code)}</b>${dead?'<span class="tag b">Не действует</span>':'<span class="tag">Активен</span>'}</div><div class="mut" style="margin:4px 0 8px">${pdesc(x)} · активаций: ${n}${x.max?' из '+x.max:''}${x.exp?' · до '+dstr(x.exp):''}</div><label>Код</label><input id="ec-${x.id}" value="${esc(x.code)}"><label>Что даёт</label><select id="et-${x.id}"><option value="money" ${x.type=='money'?'selected':''}>Деньги на баланс</option><option value="disc" ${x.type=='disc'?'selected':''}>Скидка на товар, %</option></select><label>Сумма (₽) или процент</label><input id="ea-${x.id}" type="number" min="1" value="${x.type=='money'?x.amt:x.pct}"><label>Товар (для скидки)</label><select id="ep-${x.id}"><option value="0">Любой товар</option>${po(x)}</select><label>Лимит активаций (0 — без лимита)</label><input id="em-${x.id}" type="number" min="0" value="${x.max||0}"><label>Действует до</label><input id="ee-${x.id}" type="date" value="${dstr(x.exp)}"><div class="row" style="margin-top:10px"><button data-a="psave" data-id="${x.id}">Сохранить</button><button class="d" data-a="pdel" data-id="${x.id}">Удалить</button></div></div>`}).join('')||'<p class="mut">Промокодов пока нет.</p>'}`}
 return `<h2>Админ-панель</h2><div class="tabs">${tabs.map(([k,v])=>`<button class="${atab==k?'on':''}" data-a="atab" data-v="${k}">${v}</button>`).join('')}</div>${b}`}
 
 function stat(){const h=Date.now()-6e5,act=db.log.filter(l=>l.t>h).length;
@@ -184,7 +193,7 @@ if(sess&&u&&u.blocked)$('#app').innerHTML=`<div class="auth"><h1>Доступ з
 else $('#app').innerHTML=(sess&&u?shell():authV())+(modal?`<div id="modal"><div class="card">${modal}</div></div>`:'');
 const c=$('#chat');if(c)c.scrollTop=c.scrollHeight;if(open&&$('#st'))$('#st').classList.add('open');scrollTo(0,y);
 sig=sigNow()}
-const sigNow=()=>JSON.stringify([db.users,db.products,db.orders,db.topups,online(),db.log.length,Object.keys(imgs).map(k=>k+imgs[k].length).join()]);
+const sigNow=()=>JSON.stringify([db.users,db.products,db.orders,db.topups,db.promos,online(),db.log.length,Object.keys(imgs).map(k=>k+imgs[k].length).join()]);
 function live(){if(!ready)return;if(!sess){if(!$('.auth')||$('#ld'))render();return}
  if(modal||sigNow()==sig)return;
  const f=document.activeElement,fid=f&&f.id,fv=f&&f.value,ss=f&&f.selectionStart;render();
@@ -209,16 +218,32 @@ tpm(d){const u=U();if(d.v=='rub'){modal=`<h3 style="margin-top:0">Пополне
 const m=DEP[d.v];modal=`<h3 style="margin-top:0">Пополнение: ${m.n}</h3><div class="warn">⚠️ Когда будете отправлять перевод, обязательно напишите в сообщении (комментарии) к платежу свой <b>никнейм</b> или <b>ID</b>. Без этого мы никак не сможем зачислить деньги.</div><label>Ваш никнейм</label><input value="${esc(u.nick)}" readonly><label>Ваш ID</label><input value="${u.id}" readonly><a class="btn" href="${m.u}">Перейти к оплате</a><a class="btn" style="background:var(--card2);color:var(--ink)" href="${m.w}" target="_blank" rel="noopener">Открыть в Tonkeeper</a><p class="mut" style="margin-top:10px">Если ссылки не открываются, скопируйте адрес и отправьте перевод вручную.</p><input value="${ADDR}" readonly onclick="this.select()"><button data-a="copyaddr">Скопировать адрес</button><button class="g" data-a="topup" style="margin-top:10px">← Назад</button> <button class="g" data-a="close">Закрыть</button>`;render()},
 copyaddr(){const ok=()=>toast('Адрес скопирован');try{navigator.clipboard.writeText(ADDR).then(ok,()=>{throw 0})}catch(e){const i=document.querySelector('#modal input[readonly][onclick]');if(i){i.select();try{document.execCommand('copy');ok()}catch(x){toast('Выделите адрес и скопируйте вручную')}}}},
 close(){modal='';render()},
-buy(d){const p=db.products.find(x=>x.id==d.id);if(!p)return;modal=`<h3 style="margin-top:0">Подтверждение покупки</h3><p>Вы точно хотите купить этот товар?</p><p style="margin:8px 0 14px"><b>${esc(p.name)}</b><br><span class="price">${money(p.price)}</span></p><button data-a="buyyes" data-id="${p.id}">Да</button> <button class="g" data-a="close">Нет</button>`;render()},
+buy(d){const p=db.products.find(x=>x.id==d.id);if(!p)return;modal=`<h3 style="margin-top:0">Подтверждение покупки</h3><p>Вы точно хотите купить этот товар?</p><p style="margin:8px 0 14px"><b>${esc(p.name)}</b><br>${bestDisc(U(),p)?`<s class="mut">${money(p.price)}</s> `:''}<span class="price">${money(priceFor(U(),p))}</span>${bestDisc(U(),p)?`<br><span class="mut">Скидка по промокоду ${bestDisc(U(),p).pct}%</span>`:''}</p><button data-a="buyyes" data-id="${p.id}">Да</button> <button class="g" data-a="close">Нет</button>`;render()},
 async buyyes(d){const u=U(),p=db.products.find(x=>x.id==d.id);if(!p)return;
- if(u.bal<p.price){toast('Недостаточно средств. Пополните баланс');return A.topup()}
- let id=0;await tx(()=>{const me=db.users[u.nick.toLowerCase()];id=0;if(!me||me.blocked||me.bal<p.price)return;me.bal-=p.price;id=db.seq++;db.orders.push({id,pid:p.id,nick:u.nick,name:p.name,price:p.price,st:0,msgs:[]});log(u.nick+' купил «'+p.name+'»')});
+ if(u.bal<priceFor(u,p)){toast('Недостаточно средств. Пополните баланс');return A.topup()}
+ let id=0;await tx(()=>{const me=db.users[u.nick.toLowerCase()];id=0;if(!me||me.blocked)return;const dc=bestDisc(me,p),pr=priceFor(me,p);if(me.bal<pr)return;me.bal-=pr;if(dc)me.disc.splice(me.disc.indexOf(dc),1);id=db.seq++;db.orders.push({id,pid:p.id,nick:u.nick,name:p.name,price:pr,st:0,msgs:[]});log(u.nick+' купил «'+p.name+'»'+(dc?' со скидкой '+dc.pct+'% ('+dc.c+')':''))});
  if(!id)return toast('Не удалось оформить заказ. Проверьте баланс');
  view='order:'+id;modal=`<h3 style="margin-top:0">Заказ оформлен</h3><p>Товар или услуга выполняется, подождите немного. Вас осведомят, когда товар будет готов.</p><button data-a="close" style="margin-top:12px">Понятно</button>`;render()},
 confirm(d){modal=`<h3 style="margin-top:0">Подтверждение заказа</h3><p>Вы точно хотите подтвердить заказ? Убедитесь, что товар или услуга получены.</p><div style="margin-top:14px"><button data-a="confirmyes" data-id="${d.id}">Да</button> <button class="g" data-a="close">Нет</button></div>`;render()},
 confirmyes(d){tx(()=>{const o=db.orders.find(o=>o.id==d.id);if(o&&o.nick.toLowerCase()==sess.nick&&o.st==2&&!o.done){o.done=true;o.msgs.push({f:'u',x:'✅ Заказ подтверждён: всё получено.'});o.msgs.push({f:'a',k:'rate',x:'Оцените услугу'});log('заказ #'+o.id+' подтверждён')}});modal='';render();toast('Заказ подтверждён')},
 open(d){view='order:'+d.id;render()},
 prod(d){view='prod:'+d.id;render()},
+async promoact(){const c=pcode(val('pcode'));if(!c)return toast('Введите промокод');let r='';
+ await tx(()=>{r='';const me=db.users[sess.nick];const x=db.promos.find(x=>x.code==c);if(!me||me.blocked){r='Аккаунт недоступен';return}if(!x){r='Такого промокода нет';return}
+  if(x.exp&&Date.now()>x.exp){r='Срок действия промокода истёк';return}if(x.used[sess.nick]){r='Вы уже активировали этот промокод';return}
+  if(x.max&&Object.keys(x.used).length>=x.max){r='Промокод закончился: все активации использованы';return}
+  x.used[sess.nick]=Date.now();
+  if(x.type=='money'){me.bal+=x.amt;r='ok:Промокод активирован: +'+money(x.amt)+' на баланс'}else{me.disc.push({c:x.code,pct:x.pct,pid:x.pid||0});r='ok:Промокод активирован: скидка '+x.pct+'%'}
+  log(me.nick+' активировал промокод '+x.code)});
+ if(r.startsWith('ok:')){toast(r.slice(3));render()}else toast(r||'Не удалось активировать промокод')},
+padd(){const c=pcode(val('nc')),t=val('nt'),a=Math.floor(+val('na')),pid=+val('np')||0,m=Math.max(0,Math.floor(+val('nm'))||0),e=val('ne');
+ if(!c)return toast('Введите код');if(!(a>0))return toast('Укажите сумму или процент');if(t=='disc'&&a>100)return toast('Скидка не больше 100%');
+ let bad=false;tx(()=>{bad=false;if(db.promos.some(x=>x.code==c)){bad=true;return}const id=db.seq++;db.promos.push(Object.assign({id,code:c,type:t,max:m,exp:e?new Date(e+'T23:59:59').getTime():0,used:{}},t=='money'?{amt:a}:{pct:a,pid}));log('промокод создан: '+c)}).then(()=>{toast(bad?'Такой код уже есть':'Промокод добавлен');render()})},
+psave(d){const k=d.id,c=pcode(val('ec-'+k)),t=val('et-'+k),a=Math.floor(+val('ea-'+k)),pid=+val('ep-'+k)||0,m=Math.max(0,Math.floor(+val('em-'+k))||0),e=val('ee-'+k);
+ if(!c)return toast('Введите код');if(!(a>0))return toast('Укажите сумму или процент');if(t=='disc'&&a>100)return toast('Скидка не больше 100%');
+ let bad=false;tx(()=>{bad=false;const x=db.promos.find(x=>x.id==k);if(!x)return;if(db.promos.some(y=>y.id!=k&&y.code==c)){bad=true;return}
+  x.code=c;x.type=t;x.max=m;x.exp=e?new Date(e+'T23:59:59').getTime():0;delete x.amt;delete x.pct;delete x.pid;if(t=='money')x.amt=a;else{x.pct=a;x.pid=pid}log('промокод изменён: '+c)}).then(()=>{toast(bad?'Такой код уже есть':'Сохранено');render()})},
+pdel(d){const x=db.promos.find(x=>x.id==d.id);if(!x||!confirm('Удалить промокод '+x.code+'?'))return;tx(()=>{db.promos=db.promos.filter(y=>y.id!=d.id);log('промокод удалён: '+x.code)}).then(render)},
 rstar(d){rsel=+d.v;document.querySelectorAll('.sb').forEach(b=>b.classList.toggle('on',+b.dataset.v===rsel))},
 rsend(d){if(rsel===null)return toast('Выберите оценку от 0 до 5');const x=val('rtx').trim().slice(0,400),sc=rsel;
  tx(()=>{const o=db.orders.find(o=>o.id==d.id);if(o&&o.done&&!o.rv&&o.nick.toLowerCase()==sess.nick){o.rv={s:sc,x,t:Date.now()};log('отзыв '+sc+'/5: заказ #'+o.id)}});rsel=null;rtxt='';render();toast('Спасибо за отзыв!')},
